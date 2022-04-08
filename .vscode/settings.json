@@ -1,0 +1,36 @@
+{
+    "haskell": {
+        "plugin": {
+            "importLens": {
+                "globalOn": false
+            },
+            "hlint": {
+                "globalOn": false
+            },
+            "eval": {
+                "globalOn": false
+            },
+            "moduleName": {
+                "globalOn": false
+            },
+            "splice": {
+                "globalOn": false
+            },
+            "haddockComments": {
+                "globalOn": false
+            },
+            "class": {
+                "globalOn": false
+            },
+            "retrie": {
+                "globalOn": false
+            },
+            "tactic": {
+                "globalOn": false
+            },
+            "pragmas": {
+                "globalOn": false
+            }
+        }
+    }
+}
