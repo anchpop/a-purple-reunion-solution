@@ -7,6 +7,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TransformListComp #-}
+
 
 module Lib
   ( reunion,
@@ -21,12 +23,38 @@ import qualified Data.List
 import qualified Data.Maybe
 import Data.SBV
 import Data.SBV.Control
+import qualified Data.SBV.List as L
 import Data.SBV.Maybe hiding (map)
 import Data.Traversable
 import qualified Debug.Trace
+import Prelude hiding ((!!))
 
 -- | Helper functor
 newtype Const a = Const a
+
+-- | People
+data Name
+  = SimoneMontleib
+  | WolfgangWehrhardt
+  | PrincessaTraptenkastel
+  | LanceGoldenhope
+  | HattieGizmo
+  | ProfessorGizmo
+  | AlouetteCriminale
+  | VinceCriminale
+  | GrincellaDisagreeabella
+  | FrendleyKindman
+
+nameToString SimoneMontleib = "Simone Montleib"
+nameToString WolfgangWehrhardt = "Wolfgang Wehrhardt"
+nameToString PrincessaTraptenkastel = "Princessa Traptenkastel"
+nameToString LanceGoldenhope = "Lance Goldenhope"
+nameToString HattieGizmo = "Hattie Gizmo"
+nameToString ProfessorGizmo = "Professor Gizmo"
+nameToString AlouetteCriminale = "Alouette Criminale"
+nameToString VinceCriminale = "Vince Criminale"
+nameToString GrincellaDisagreeabella = "Grincella Disagreeabella"
+nameToString FrendleyKindman = "Frendley Kindman"
 
 -- | Roles
 data Role = Culprit | Bystander
@@ -44,9 +72,10 @@ mkSymbolicEnumeration ''Role
 mkSymbolicEnumeration ''Sex
 mkSymbolicEnumeration ''Room
 mkSymbolicEnumeration ''Wolfgang
+mkSymbolicEnumeration ''Name
 
 data Person f = Person
-  { nm :: String,
+  { nm :: Name,
     sex :: f Sex,
     roleOne :: f Role,
     roleTwo :: f Role,
@@ -55,7 +84,33 @@ data Person f = Person
     isWolfgang :: f (Wolfgang)
   }
 
-newPerson :: String -> Symbolic (Person SBV)
+names :: [Name]
+names =
+  [ SimoneMontleib,
+    WolfgangWehrhardt,
+    PrincessaTraptenkastel,
+    LanceGoldenhope,
+    HattieGizmo,
+    ProfessorGizmo,
+    AlouetteCriminale,
+    VinceCriminale,
+    GrincellaDisagreeabella,
+    FrendleyKindman
+  ]
+
+liftName :: Name -> SBV Name
+liftName SimoneMontleib = sSimoneMontleib
+liftName WolfgangWehrhardt = sWolfgangWehrhardt
+liftName PrincessaTraptenkastel = sPrincessaTraptenkastel
+liftName LanceGoldenhope = sLanceGoldenhope
+liftName HattieGizmo = sHattieGizmo
+liftName ProfessorGizmo = sProfessorGizmo
+liftName AlouetteCriminale = sAlouetteCriminale
+liftName VinceCriminale = sVinceCriminale
+liftName GrincellaDisagreeabella = sGrincellaDisagreeabella
+liftName FrendleyKindman = sFrendleyKindman
+
+newPerson :: Name -> Symbolic (Person SBV)
 newPerson n = Person n <$> free_ <*> free_ <*> free_ <*> free_ <*> free_ <*> free_
 
 -- | Get the concrete value of the person in the model
@@ -74,17 +129,17 @@ showPeople people =
   let (culprits1, culprits2, culprits3, bystanders) = categories
    in Data.List.dropWhileEnd isSpace $
         unlines $
-          ["Culprits (room 1: " <> deathsInRoom One <> "):"]
+          ["Room 1 Culprits (deaths: " <> deathsInRoom One <> "):"]
             <> Data.List.sort (fmap nm' culprits1)
-            <> ["Culprits (room 2: " <> deathsInRoom Two <> "):"]
+            <> ["Room 2 Culprits (deaths: " <> deathsInRoom Two <> "):"]
             <> Data.List.sort (fmap nm' culprits2)
-            <> ["Culprits (room 3: " <> deathsInRoom Three <> "):"]
+            <> ["Room 3 Culprits (deaths: " <> deathsInRoom Three <> "):"]
             <> Data.List.sort (fmap nm' culprits3)
             <> ["Bystanders:"]
             <> Data.List.sort (fmap nm' bystanders)
   where
-    nm' = ("  " <>) . nm
-    deathsInRoom room = (Data.List.intercalate ", " . Data.List.sort $ Data.Maybe.mapMaybe (\Person {nm, apparentlyDied=Const apparentlyDied} -> if apparentlyDied == (Just room) then Just nm else Nothing) people)
+    nm' = ("  " <>) . (nameToString . nm)
+    deathsInRoom room = (Data.List.intercalate ", " . Data.List.sort $ Data.Maybe.mapMaybe (\Person {nm, apparentlyDied = Const apparentlyDied} -> if apparentlyDied == (Just room) then Just (show nm) else Nothing) people)
     categories :: ([Person Const], [Person Const], [Person Const], [Person Const])
     categories =
       ( filter culprit1 people,
@@ -100,56 +155,85 @@ showPeople people =
         culprit3 (Person _ _ _ _ (Const Culprit) _ _) = True
         culprit3 _ = False
 
-reunion :: IO ([Person Const])
+reunion :: IO ([Person Const], [(Name, [Name])])
 reunion = runSMT $ do
   setOption $ ProduceUnsatCores True
   setOption $ OptionKeyword ":smt.core.minimize" ["true"]
   -- Characters
-  simone <- person "Simone Montleib" sWoman Nothing
-  wolfgang <- person "Wolfgang Wehrhardt" sMan (Just sOne)
-  princessa <- person "Princessa Traptenkastel" sWoman (Just sOne)
-  lance <- person "Lance Goldenhope" sMan (Just sOne)
-  hattie <- person "Hattie Gizmo" sWoman (Just sTwo)
-  gizmo <- person "Professor Gizmo" sMan (Nothing)
-  alouette <- person "Alouette Criminale" sWoman (Just sThree)
-  vince <- person "Vince Criminale" sMan (Just sTwo)
-  grincella <- person "Grincella Disagreeabella" sWoman (Nothing)
-  frendley <- person "Frendley Kindman" sMan (Nothing)
+  simone <- person SimoneMontleib sWoman Nothing
+  wolfgang <- person WolfgangWehrhardt sMan (Just sOne)
+  princessa <- person PrincessaTraptenkastel sWoman (Just sOne)
+  lance <- person LanceGoldenhope sMan (Just sOne)
+  hattie <- person HattieGizmo sWoman (Just sTwo)
+  gizmo <- person ProfessorGizmo sMan (Nothing)
+  alouette <- person AlouetteCriminale sWoman (Just sThree)
+  vince <- person VinceCriminale sMan (Just sTwo)
+  grincella <- person GrincellaDisagreeabella sWoman (Nothing)
+  frendley <- person FrendleyKindman sMan (Nothing)
 
   let people = [simone, wolfgang, princessa, lance, hattie, gizmo, alouette, vince, grincella, frendley]
 
+  let nameToPerson SimoneMontleib = simone
+      nameToPerson WolfgangWehrhardt = wolfgang
+      nameToPerson PrincessaTraptenkastel = princessa
+      nameToPerson LanceGoldenhope = lance
+      nameToPerson HattieGizmo = hattie
+      nameToPerson ProfessorGizmo = gizmo
+      nameToPerson AlouetteCriminale = alouette
+      nameToPerson VinceCriminale = vince
+      nameToPerson GrincellaDisagreeabella = grincella
+      nameToPerson FrendleyKindman = frendley
+
+  couldBeKilledBy <- (newArray "couldBeKilledBy" Nothing) :: Symbolic (SArray Name ([Name]))
+  culprits <- sList "culprits" :: Symbolic (SList (Name))
+
+  {-
+  for_ names $ \name -> constrain $ do
+    (liftName name) `L.elem` culprits .== culprit (nameToPerson name)
+
+  for_ names $ \name ->
+    constrain $
+      let p = nameToPerson name
+       in (bystander p .&& isJust (apparentlyDied p)) `implies` (L.length ((couldBeKilledBy) `readArray` (liftName name)) .>= 1) --L.length ((couldBeKilledBy) `readArray` (liftName name)) .== ite (bystander p .&& isJust (apparentlyDied p)) 1 0
+    -}
   -- Round 1
-  murder One people [wolfgang, lance, princessa] [[gizmo, hattie], [vince, alouette], [grincella, frendley]] alouette lance vince hattie gizmo wolfgang
+  murder One people [wolfgang, lance, princessa] [[gizmo, hattie], [vince, alouette], [grincella, frendley]] couldBeKilledBy alouette lance vince hattie gizmo wolfgang
   inspectBody One hattie wolfgang
   inspectBody One alouette lance
   inspectBody One grincella princessa
 
   -- Round 2
-  murder Two people [hattie, vince] [[simone, grincella, alouette], [gizmo, frendley]] alouette lance vince hattie gizmo wolfgang
+  murder Two people [hattie, vince] [[simone, grincella, alouette], [gizmo, frendley]] couldBeKilledBy alouette lance vince hattie gizmo wolfgang
   inspectBody Two gizmo hattie
   inspectBody Two frendley vince
-  namedConstraint (unwords [nm gizmo, "says", nm vince, "can't have killed hattie on room 2"]) $ purple gizmo (roleTwo vince .== sBystander)
+  constrain $ purple gizmo (roleTwo vince .== sBystander)
 
   -- Round 3
-  murder Three people [alouette] [[simone, frendley], [grincella, gizmo]] alouette lance vince hattie gizmo wolfgang
+  murder Three people [alouette] [[simone, frendley], [grincella, gizmo]] couldBeKilledBy alouette lance vince hattie gizmo wolfgang
   inspectBody Three simone alouette
-
-  -- test
-  -- constrain $ bystander grincella 
 
   query $ do
     cs <- checkSat
     case cs of
       Sat -> do
-        for people (getPerson)
-      _ -> do 
+        people <- for people (getPerson)
+        couldBeKilledBy <-
+          for
+            names
+            ( \name -> do
+                killers <- getValue (couldBeKilledBy `readArray` (liftName name))
+                pure (name, killers)
+            )
+        pure (people, couldBeKilledBy)
+      _ -> do
         unsatCore <- getUnsatCore
         error $ unlines ["Solver said: " <> show cs, "Unsatisfiable constraints:", show unsatCore]
+
   where
     person name theirSex whenDied = do
       p <- newPerson name
       constrain $ sex p .== theirSex
-      constrain $ isWolfgang p .== (if name == "Wolfgang Wehrhardt" then sWolfgang else sNotWolfgang)
+      constrain $ isWolfgang p .== (if name == WolfgangWehrhardt then sWolfgang else sNotWolfgang)
       constrain $ apparentlyDied p .== (liftMaybe whenDied)
       pure p
 
@@ -160,57 +244,69 @@ reunion = runSMT $ do
     liftRoom Two = sTwo
     liftRoom Three = sThree
 
-    murder room people victims alibiSets alouette lance vince hattie gizmo wolfgang = do
+    murder room people victims alibiSets couldBeKilledBy alouette lance vince hattie gizmo wolfgang = do
       for_ alibiSets (\alibiSet -> vouch room alibiSet)
+
       -- Every victim must apparently die in the room they die in
       for_ victims (\victim -> constrain $ apparentlyDied victim .== (liftMaybe $ Just (liftRoom room)))
-      for_ (filter (\p -> not (nm p `elem` map nm victims)) people) (\victim -> constrain $ apparentlyDied victim ./= (liftMaybe $ Just (liftRoom room)))
+      for_ (filter (\p -> not (nm p `elem` map nm victims)) people) (\nonvictim -> constrain $ apparentlyDied nonvictim ./= (liftMaybe $ Just (liftRoom room)))
 
+      -- shouldn't be necessary but it's useful for testing
+      constrain $ culpritsForRoom .<= (fromIntegral $ length victims)
+      {-
       -- And the number of culprits for that room must be greater than or equal to one
       -- and less than or equal to the number of victims who aren't culprits
       constrain $ culpritsForRoom .>= 1
-      constrain $ culpritsForRoom .<= trueVictimsForRoom
+      
 
       --And if neither alouette and lance are culprits, there must be at least one man involevd in any
       --murder of a man
-      namedConstraint (unwords ["for room", show room, nm alouette, "says that", nm lance, "says that only a man can kill a man"]) $ purple alouette (purple lance (haveAManToKillAMan))
+      constrain $ purple alouette (purple lance (haveAManToKillAMan))
 
       -- And if vince is the victim and not a culprit, wolfgang can't have killed him
-      when vinceAppearsToBeVictim . namedConstraint (unwords [nm vince, "says", nm wolfgang, "can't kill him"]) $ purple vince (nonWolfgangCulprits .>= 1)
+      when vinceAppearsToBeVictim . constrain $ purple vince (nonWolfgangCulprits .>= 1)
+      -}
 
       -- And every true victim must have exactly one person who could have killed them
-      for_
-        victims
-        ( \v ->
-            ( namedConstraint (nm v <> " has only one killer")  $
-              -- if the victim is a bystander, i.e. if they really died
-              Debug.Trace.traceShow (nm v) $ (bystander v)
-                `implies`
-                ((allCulpritsF
-                  ( \c ->
-                      -- Could culprit c have killed victim v?
-                      -- you can't kill youreslf
-                      if nm c == nm v then sFalse else
-                        ( observe (nm c <> " could have killed " <> nm v <> "?") $ sAll
-                            id
-                            [ -- A woman can't kill a man, if alouette and lance are to be believed
-                              purple alouette (purple lance (sNot (sex v .== sMan .&& sex c .== sWoman))),
-                              -- and if vince is a victim, wolfgang can't have killed him
-                              (if nm v == nm vince && nm c == nm wolfgang then sFalse else sTrue),
-                              -- and the killer cannot have an alibi that includes someone who isn't a culprit
-                              -- so let's get everyone who guarantees their alibi for this murder, and check they're all culprits
-                              let guarantours = join . Data.Maybe.mapMaybe (\alibiSet -> if (nm c `elem` map nm alibiSet) then Just (filter (\g -> nm g /= nm c) $ alibiSet) else Nothing) $ alibiSets
-                              in Debug.Trace.traceShow (nm c, room, map nm guarantours) $ sAll culprit guarantours,
-                              -- also, gizmo says in room 2 that vince did not kill hattie
-                              if room == Two && nm c == nm vince && nm v == nm hattie then purple gizmo sFalse else sTrue
-                            ]
-                        )
-                  )
-                  .>= 1))
-            )
+      possibleMurders <- for 
+        (pairs people)
+        ( \(v, p) ->
+            let couldHaveDoneIt = v `computeCouldBeKilledBy` p in do
+            constrain $ sAnd [
+                -- trueVictim v `implies` ((liftName $ nm p) `L.elem` (couldBeKilledBy `readArray` (liftName $ nm v)) .== couldHaveDoneIt)
+                couldHaveDoneIt `implies` (role p .== sCulprit)
+                ]
+            pure (v, p, couldHaveDoneIt)
         )
+      -- make sure all the victims can only be murdered by exactly one person
+      for_ people $ \p -> do
+        let possibileMurderers = filter (\(v, _, _) -> nm v == nm p) (possibleMurders) 
+        namedConstraint (unwords [nameToString (nm p), "is either culprit or killed by exactly one person in room", show room]) . (\amount -> (ite (trueVictim p) (amount .== (1 :: SWord8)) (amount .== (0 :: SWord8)))) . sum . map oneIf . map (\(_,_,x) -> x) $ possibileMurderers
+      -- make sure all the culprits this round murder at least one person
+      for_ people $ \p -> do
+        let possibileMurderees = filter (\(_, c, _) -> nm c == nm p) (possibleMurders) 
+        namedConstraint (unwords [nameToString (nm p), "is either victim or kills at least one person in room", show room]). (\amount -> (ite (culpritThisRound p) (amount .>= (1 :: SWord8)) (amount .== (0 :: SWord8)))) . sum . map oneIf . map (\(_,_,x) -> x) $ possibileMurderees
+
       where
+        computeCouldBeKilledBy v p =
+          if nm v == nm p
+            then sFalse
+            else
+              ite
+                ( culprit p .&& trueVictim v)
+                ( let c = p
+                   in sAnd
+                        [ let guarantours = join . Data.Maybe.mapMaybe (\alibiSet -> if (nm c `elem` map nm alibiSet) then Just (filter (\g -> nm g /= nm c) $ alibiSet) else Nothing) $ alibiSets
+                           in sAll culprit guarantours,
+                          purple alouette (purple lance (sNot (sex v .== sMan .&& sex c .== sWoman))),
+                          if nm v == nm vince && nm c == nm wolfgang then sFalse else sTrue,
+                          if room == Two && nm c == nm vince && nm v == nm hattie then purple gizmo sFalse else sTrue
+                        ]
+                )
+                sFalse
         role = roomToRole room
+        trueVictim victim = bystander victim .&& apparentlyDied victim .== (liftMaybe $ Just (liftRoom room))
+        culpritThisRound culprit = role culprit .== sCulprit
         trueVictimCountForRoomF f = (sum (map (\victim -> oneIf (bystander victim .&& f victim)) victims)) :: SWord8
         trueVictimsForRoom = trueVictimCountForRoomF $ \_ -> sTrue
         allCulpritsF f = (sum (map (\p -> oneIf $ (culprit p .&& (f p))) people) :: SWord8)
@@ -222,16 +318,17 @@ reunion = runSMT $ do
         vinceAppearsToBeVictim = Data.List.any (\v -> nm v == nm vince) victims
         nonWolfgangCulprits = culpritsForRoomF $ \c -> isWolfgang c .== sNotWolfgang
 
+
     {- s must be true if a bystander says it, otherwise it could be false -}
     purple p s = (bystander p) `implies` s
 
     {- if the inspector is a bystander, the victim is a bystander (and they better be dead)  -}
-    inspectBody room inspector victim = namedConstraint (unwords [nm inspector, "inspects", nm victim]) $ purple inspector (bystander victim .&& (apparentlyDied victim .== (liftMaybe $ Just (liftRoom room))))
+    inspectBody room inspector victim = constrain $ purple inspector (bystander victim .&& (apparentlyDied victim .== (liftMaybe $ Just (liftRoom room))))
 
     pairs l =
       let unmirrored_pairs = [(x, y) | (x : ys) <- Data.List.tails l, y <- ys]
        in unmirrored_pairs <> fmap (\(x, y) -> (y, x)) unmirrored_pairs
-    vouch room people = for_ (pairs people) (\(voucher, vouchee) -> namedConstraint (unwords [nm voucher, "vouches for", nm vouchee]) $ purple voucher ((roomToRole room) vouchee .== sBystander))
+    vouch room people = for_ (pairs people) (\(voucher, vouchee) -> constrain $ purple voucher ((roomToRole room) vouchee .== sBystander))
 
     culprit p = roleOne p .== sCulprit .|| roleTwo p .== sCulprit .|| roleThree p .== sCulprit
     bystander = sNot . culprit

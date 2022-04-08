@@ -32,7 +32,7 @@ library:
   - -Wincomplete-uni-patterns
   - -Wredundant-constraints
   - -Wno-unused-top-binds
-  - -Werror 
+  # - -Werror 
 
 executables:
   reunion-in-purple-exe:
